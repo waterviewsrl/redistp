@@ -1,0 +1,26 @@
+{
+  "name": "RTP",
+  "version": "1.0.0",
+  "description": "FTP to Redis bridge",
+  "author": "Matteo Ferrabone <matteo.ferrabone@waterview.it>",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "bluebird": "^3.5.1",
+    "bunyan": "^1.8.12",
+    "dotenv": "^16.0.0",
+    "ftp-srv": "^4.6.0",
+    "ip": "^1.1.5",
+    "ldap-authentication": "^2.2.9",
+    "ldapjs": "^2.3.2",
+    "lodash": "^4.17.21",
+    "log-stream": "^4.0.0",
+    "log2stream": "^3.1.1",
+    "moment": "^2.22.1",
+    "netmask": "^2.0.2",
+    "redis": "^4.5.1",
+    "yargs": "^17.4.1"
+  }
+}
