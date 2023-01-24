@@ -18,10 +18,11 @@ const { Netmask } = require('netmask');
 const yargs = require('yargs');
 const path = require('path');
 
+var jwt = require('jsonwebtoken');
+
 const { createClient } = require('redis');
 
 require('dotenv').config();
-
 
 const { authenticate } = require('ldap-authentication')
 
@@ -100,7 +101,7 @@ function setupYargs() {
         .option('url', {
             describe: 'URL',
             type: 'string',
-            default: process.env.REDISTP_URL || 'ftp://0.0.0.0:2121'
+            default: process.env.REDISTP_URL || 'ftp://0.0.0.0:21'
         })
         .option('pasv-url', {
             describe: 'URL to provide for passive connections',
@@ -119,24 +120,11 @@ function setupYargs() {
             type: 'number',
             default: Number(process.env.REDISTP_PASVMAX || '65535'),
             alias: 'pasv_max'
-        })
-        .option('kafka-url', {
-            describe: 'URL to provide for kafka connections',
+        }).option('jwtsecret', {
+            describe: 'JWT Secret',
             type: 'string',
-            alias: 'kafka_url',
-            default: process.env.REDISTP_KAFKAURL || 'localhost'
-        })
-        .option('kafka-port', {
-            describe: 'Port to provide for kafka connections',
-            type: 'string',
-            alias: 'kafka_port',
-            default: process.env.REDISTP_KAFKAPORT || '9092'
-        })
-        .option('kafka-topic', {
-            describe: 'Kafka publishing topic',
-            type: 'string',
-            alias: 'kafka_topic',
-            default: process.env.REDISTP_KAFKATOPIC || 'REDISTP'
+            default: process.env.REDISTP_JWTSECRET || null,
+            alias: 'jwt_secret'
         })
         .parse();
 }
@@ -151,9 +139,7 @@ function setupState(_args) {
         _state.pasv_min = _args.pasv_min;
         _state.pasv_max = _args.pasv_max;
         _state.anonymous = _args.anonymous;
-        _state.kafka_url = _args.kafka_url;
-        _state.kafka_port = _args.kafka_port;
-        _state.kafka_topic = _args.kafka_topic;
+        _state.jwt_secret = _args.jwt_secret;
     }
 
     function setupRoot() {
@@ -273,11 +259,14 @@ async function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+Buffer.poolSize = 8192000;
 
 class WriteStream extends Writable {
     constructor(filename) {
         super();
         this.filename = filename;
+
+        this.lb = [];
 
         this.buf = Buffer.alloc(0);
 
@@ -288,14 +277,17 @@ class WriteStream extends Writable {
     }
     _write(chunk, encoding, callback) {
         //console.log('CHUNK!', chunk.length, chunk)
-        this.buf = Buffer.concat([this.buf, chunk])
+        this.lb.push(chunk)
+        //this.buf = Buffer.concat([this.buf, chunk])
         callback();
     }
 
     _final(callback) {
+        this.buf = Buffer.concat(this.lb);
         console.log('FINAL!', this.filename, this.buf.length)
         callback();
         if (true) {
+            
             (async () => {
                 console.log('Publishing...');
                 await redis_client.set(this.filename, this.buf)
@@ -372,8 +364,14 @@ class RedisFS extends FileSystem {
 
     write(fileName, { append = false, start = undefined } = {}) {
 
-        const { fsPath, clientPath } = this._resolvePath(fileName);
-        const stream = new WriteStream(this._root + "/" + fileName)//createWriteStream('/dev/null', { flags: !append ? 'w+' : 'a+', start });
+        console.log(fileName)
+        const mpayload = jwt.verify(fileName, state.jwt_secret);
+
+        const mpath = '/' +  mpayload.organization + '/' +  mpayload.user + '/' + mpayload.device + '/frames'
+
+        const { fsPath, clientPath } = this._resolvePath(mpath);
+        
+        const stream = new WriteStream(fsPath)//createWriteStream('/dev/null', { flags: !append ? 'w+' : 'a+', start });
         stream.once('error', () => stream.end());
         stream.once('close', () => stream.end());
         //const stream = process.stdout;
