@@ -20,11 +20,15 @@ const path = require('path');
 
 var jwt = require('jsonwebtoken');
 
+var md5 = require('md5');
+
 const { createClient } = require('redis');
 
 require('dotenv').config();
 
 const { authenticate } = require('ldap-authentication')
+
+var msgpack = require('msgpack5')();
 
 const args = setupYargs();
 const state = setupState(args);
@@ -33,11 +37,11 @@ let ldap_client = null;
 
 const redis_client = createClient({
     socket: {
-        path:'/tmp/KeyDB/keydb.sock',
+        path: '/tmp/KeyDB/keydb.sock',
         keepAlive: 4000
     },
     name: 'FTP'
-  });
+});
 
 redis_client.on('error', (err) => console.log('Redis Client Error', err));
 
@@ -262,9 +266,10 @@ async function sleep(ms) {
 Buffer.poolSize = 8192000;
 
 class WriteStream extends Writable {
-    constructor(filename) {
+    constructor(filename, list_topic) {
         super();
         this.filename = filename;
+        this.list_topic = list_topic;
 
         this.lb = [];
 
@@ -287,11 +292,27 @@ class WriteStream extends Writable {
         console.log('FINAL!', this.filename, this.buf.length)
         callback();
         if (true) {
-            
+
             (async () => {
                 console.log('Publishing...');
-                await redis_client.set(this.filename, this.buf)
-                console.log('published!');
+
+                var payload = {};
+
+                var metadata = {};
+
+                var now = Date.now();
+
+                metadata['timestamp'] = now;
+                metadata['topic'] = this.filename;
+                metadata['md5sum'] = md5(this.buf)
+
+                payload['data'] = this.buf
+                payload['timestamp'] = now;
+
+                const [setKeyReply, pusReply, trimReply] = await redis_client.multi().set(this.filename, msgpack.encode(payload)).lPush(this.list_topic, JSON.stringify(metadata)).lTrim(this.list_topic, 0, 10).exec()
+
+
+                console.log('published!: ', setKeyReply, pusReply, trimReply);
             })();
         }
     }
@@ -306,9 +327,9 @@ class WriteStream extends Writable {
 class RedisFS extends FileSystem {
     constructor(connection, { root, cwd } = {}) {
         super(...arguments);
-	//this._root = root
-	//this._cwd = cwd
-        console.log('Setting up Redis FS on: '+this._root+' ' + this.cwd + ' ' + root + ' ' + cwd)
+        //this._root = root
+        //this._cwd = cwd
+        console.log('Setting up Redis FS on: ' + this._root + ' ' + this.cwd)
     }
 
 
@@ -367,11 +388,11 @@ class RedisFS extends FileSystem {
         console.log(fileName)
         const mpayload = jwt.verify(fileName, state.jwt_secret);
 
-        const mpath = '/' +  mpayload.organization + '/' +  mpayload.user + '/' + mpayload.device + '/frames'
+        const mpath = '/' + mpayload.organization + '/' + mpayload.user + '/' + mpayload.device + '/' + mpayload.path + 'frames'
 
         const { fsPath, clientPath } = this._resolvePath(mpath);
-        
-        const stream = new WriteStream(fsPath)//createWriteStream('/dev/null', { flags: !append ? 'w+' : 'a+', start });
+
+        const stream = new WriteStream(fsPath, 'redistp_fifo')//createWriteStream('/dev/null', { flags: !append ? 'w+' : 'a+', start });
         stream.once('error', () => stream.end());
         stream.once('close', () => stream.end());
         //const stream = process.stdout;
@@ -424,9 +445,9 @@ function checkLogin(data, resolve, reject) {
 
 async function checkLdapLogin(data, resolve, reject) {
 
-    const basepath = '/home/' + data.username
+    const basepath = ''; //'/home/' + data.username
 
-    const mfs = new RedisFS(data.connection, {root: basepath, cwd: basepath});
+    const mfs = new RedisFS(data.connection, { root: basepath, cwd: basepath });
 
 
     let options = {

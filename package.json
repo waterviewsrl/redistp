@@ -13,6 +13,7 @@
     "dotenv": "^16.0.0",
     "ftp-srv": "^4.6.0",
     "ip": "^1.1.5",
+    "md5": "^2.3.0",
     "jsonwebtoken": "^9.0.0",
     "ldap-authentication": "^2.2.9",
     "ldapjs": "^2.3.2",
@@ -20,6 +21,7 @@
     "log-stream": "^4.0.0",
     "log2stream": "^3.1.1",
     "moment": "^2.22.1",
+    "msgpack5": "^6.0.2",
     "netmask": "^2.0.2",
     "redis": "^4.5.1",
     "yargs": "^17.4.1"
