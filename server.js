@@ -129,6 +129,10 @@ function setupYargs() {
             type: 'string',
             default: process.env.REDISTP_JWTSECRET || null,
             alias: 'jwt_secret'
+        }).option('expire', {
+            describe: 'Redis Expire Time (seconds)',
+            type: 'number',
+            default: Number(process.env.REDISTP_EXPIRE || '60')
         })
         .parse();
 }
@@ -144,6 +148,7 @@ function setupState(_args) {
         _state.pasv_max = _args.pasv_max;
         _state.anonymous = _args.anonymous;
         _state.jwt_secret = _args.jwt_secret;
+        _state.expire = _args.expire;
     }
 
     function setupRoot() {
@@ -266,10 +271,11 @@ async function sleep(ms) {
 Buffer.poolSize = 8192000;
 
 class WriteStream extends Writable {
-    constructor(filename, list_topic) {
+    constructor(filename, list_topic, expire) {
         super();
         this.filename = filename;
         this.list_topic = list_topic;
+        this.expire = expire;
 
         this.lb = [];
 
@@ -309,7 +315,7 @@ class WriteStream extends Writable {
                 payload['data'] = this.buf
                 payload['timestamp'] = now;
 
-                const [setKeyReply, pusReply, trimReply] = await redis_client.multi().set(this.filename, msgpack.encode(payload)).lPush(this.list_topic, JSON.stringify(metadata)).lTrim(this.list_topic, 0, 10).exec()
+                const [setKeyReply, pusReply, trimReply] = await redis_client.multi().set(this.filename, msgpack.encode(payload)).expire(this.filename, this.expire).lPush(this.list_topic, JSON.stringify(metadata)).lTrim(this.list_topic, 0, 10).exec()
 
 
                 console.log('published!: ', setKeyReply, pusReply, trimReply);
@@ -388,11 +394,15 @@ class RedisFS extends FileSystem {
         console.log(fileName)
         const mpayload = jwt.verify(fileName, state.jwt_secret);
 
-        const mpath = '/' + mpayload.organization + '/' + mpayload.user + '/' + mpayload.device + '/' + mpayload.path + 'frames'
+        var now = new Date();
+
+        var extension = mpayload.ext || "jpg";
+
+        const mpath = '/' + mpayload.organization + '/' + mpayload.user + '/' + mpayload.device + '/' + mpayload.path + '/' + now.toISOString() + '.' + extension;
 
         const { fsPath, clientPath } = this._resolvePath(mpath);
 
-        const stream = new WriteStream(fsPath, 'redistp_fifo')//createWriteStream('/dev/null', { flags: !append ? 'w+' : 'a+', start });
+        const stream = new WriteStream(fsPath, 'redistp_fifo', state.expire)//createWriteStream('/dev/null', { flags: !append ? 'w+' : 'a+', start });
         stream.once('error', () => stream.end());
         stream.once('close', () => stream.end());
         //const stream = process.stdout;
