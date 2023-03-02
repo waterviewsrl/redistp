@@ -306,19 +306,25 @@ class WriteStream extends Writable {
 
                 var metadata = {};
 
-                var now = Date.now();
+                var now = new Date();
+
+                const last_topic = this.filename + '/last';
+                const topic = this.filename + '/' + now.toISOString();
 
                 metadata['timestamp'] = now;
-                metadata['topic'] = this.filename;
+                metadata['last_topic'] = last_topic;
+                metadata['topic'] = topic;
                 metadata['md5sum'] = md5(this.buf)
 
                 payload['data'] = this.buf
-                payload['timestamp'] = now;
+                payload['timestamp'] = now.valueOf();
 
-                const [setKeyReply, pusReply, trimReply] = await redis_client.multi().set(this.filename, msgpack.encode(payload)).expire(this.filename, this.expire).lPush(this.list_topic, JSON.stringify(metadata)).lTrim(this.list_topic, 0, 10).exec()
+                const pdump = msgpack.encode(payload)
+
+                const [setKeyReply_1, expReply_1, setKeyReply_2, expReply_2, pushReply, trimReply] = await redis_client.multi().set(topic, pdump).expire(topic, this.expire).set(last_topic, pdump).expire(last_topic, this.expire).lPush(this.list_topic, JSON.stringify(metadata)).lTrim(this.list_topic, 0, 32).exec()
 
 
-                console.log('published!: ', setKeyReply, pusReply, trimReply);
+                console.log('published!: ', setKeyReply_1, expReply_1, setKeyReply_2, expReply_2, pushReply, trimReply);
             })();
         }
     }
@@ -392,15 +398,10 @@ class RedisFS extends FileSystem {
     write(fileName, { append = false, start = undefined } = {}) {
 
         console.log(fileName)
-        const mpayload = jwt.verify(fileName, state.jwt_secret);
 
-        var now = new Date();
 
-        var extension = mpayload.ext || "jpg";
 
-        const mpath = '/' + mpayload.organization + '/' + mpayload.user + '/' + mpayload.device + '/' + mpayload.path + '/' + now.toISOString() + '.' + extension;
-
-        const { fsPath, clientPath } = this._resolvePath(mpath);
+        const { fsPath, clientPath } = this._resolvePath(fileName);
 
         const stream = new WriteStream(fsPath, 'redistp_fifo', state.expire)//createWriteStream('/dev/null', { flags: !append ? 'w+' : 'a+', start });
         stream.once('error', () => stream.end());
@@ -444,6 +445,7 @@ class RedisFS extends FileSystem {
 
 function checkLogin(data, resolve, reject) {
     const user = state.credentials[data.username];
+    console.log('USER: ', user, data)
     if (state.anonymous || user && user.password === data.password) {
         const mfs = new RedisFS(data.connection, '/', '/');
         return resolve({ root: user && user.root || state.root, fs: mfs });
