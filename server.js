@@ -133,6 +133,10 @@ function setupYargs() {
             describe: 'Redis Expire Time (seconds)',
             type: 'number',
             default: Number(process.env.REDISTP_EXPIRE || '60')
+        }).option('expire_last', {
+            describe: 'Redis Expire Last Frame Time (seconds)',
+            type: 'number',
+            default: Number(process.env.REDISTP_EXPIRE_LAST || '600')
         })
         .parse();
 }
@@ -149,6 +153,7 @@ function setupState(_args) {
         _state.anonymous = _args.anonymous;
         _state.jwt_secret = _args.jwt_secret;
         _state.expire = _args.expire;
+        _state.expire_last = _args.expire_last;
     }
 
     function setupRoot() {
@@ -271,11 +276,12 @@ async function sleep(ms) {
 Buffer.poolSize = 8192000;
 
 class WriteStream extends Writable {
-    constructor(filename, list_topic, expire) {
+    constructor(filename, list_topic, expire, expire_last) {
         super();
         this.filename = filename;
         this.list_topic = list_topic;
         this.expire = expire;
+        this.expire_last = expire_last;
 
         this.lb = [];
 
@@ -321,7 +327,7 @@ class WriteStream extends Writable {
 
                 const pdump = msgpack.encode(payload)
 
-                const [setKeyReply_1, expReply_1, setKeyReply_2, expReply_2, pushReply, trimReply] = await redis_client.multi().set(topic, pdump).expire(topic, this.expire).set(last_topic, pdump).expire(last_topic, this.expire).lPush(this.list_topic, JSON.stringify(metadata)).lTrim(this.list_topic, 0, 32).exec()
+                const [setKeyReply_1, expReply_1, setKeyReply_2, expReply_2, pushReply, trimReply] = await redis_client.multi().set(topic, pdump).expire(topic, this.expire).set(last_topic, pdump).expire(last_topic, this.expire_last).lPush(this.list_topic, JSON.stringify(metadata)).lTrim(this.list_topic, 0, 32).exec()
 
 
                 console.log('published!: ', setKeyReply_1, expReply_1, setKeyReply_2, expReply_2, pushReply, trimReply);
@@ -403,7 +409,7 @@ class RedisFS extends FileSystem {
 
         const { fsPath, clientPath } = this._resolvePath(fileName);
 
-        const stream = new WriteStream(fsPath, 'redistp_fifo', state.expire)//createWriteStream('/dev/null', { flags: !append ? 'w+' : 'a+', start });
+        const stream = new WriteStream(fsPath, 'redistp_fifo', state.expire, state.expire_last)//createWriteStream('/dev/null', { flags: !append ? 'w+' : 'a+', start });
         stream.once('error', () => stream.end());
         stream.once('close', () => stream.end());
         //const stream = process.stdout;
@@ -445,7 +451,6 @@ class RedisFS extends FileSystem {
 
 function checkLogin(data, resolve, reject) {
     const user = state.credentials[data.username];
-    console.log('USER: ', user, data)
     if (state.anonymous || user && user.password === data.password) {
         const mfs = new RedisFS(data.connection, '/', '/');
         return resolve({ root: user && user.root || state.root, fs: mfs });
